@@ -88,13 +88,59 @@ function pageDescription(id:string){const d:Record<string,string>={dashboard:'In
 function PanelTitle({title,subtitle,action}:{title:string,subtitle:string,action?:any}){return <div className="panel-title"><div><h3>{title}</h3><p>{subtitle}</p></div>{action}</div>}
 function Stat({label,value,unit,change,icon:Icon,tone='blue'}:any){return <div className="stat-card"><div className={`stat-icon ${tone}`}><Icon size={19}/></div><div className="stat-label">{label}</div><div className="stat-value">{value}<small>{unit}</small></div><div className="stat-foot">{change}</div></div>}
 function Dashboard({summary,events,busy,onSync,onOpen}:any){
- const s=summary||{}, dist=s.magnitude_distribution||[], ts=s.timeseries||[]
- return <><div className="demo-notice"><span className="notice-icon"><AlertTriangle size={16}/></span><div><b>Modo de demostración</b><span>Los registros de ejemplo están identificados. Sincroniza una fuente para consultar eventos reales publicados por el proveedor.</span></div><button onClick={onSync} disabled={busy}><RefreshCw size={14}/> Sincronizar fuente</button></div>
- <div className="stat-grid"><Stat label="Eventos registrados" value={n(s.total_events,0)} unit="eventos" change={`${n(s.recent_events,0)} en los últimos 7 días`} icon={Waves}/><Stat label="Magnitud media" value={n(s.avg_magnitude,2)} unit="Mw / ML*" change="Promedio del catálogo actual" icon={Activity} tone="cyan"/><Stat label="Profundidad media" value={n(s.avg_depth,1)} unit="km" change={`Mediana ${n(s.median_depth,1)} km`} icon={Layers3} tone="purple"/><Stat label="Fuentes y calidad" value="Monitoreo" unit="" change="Verifica estado de conectores" icon={RadioTower} tone="amber"/></div>
- <div className="dashboard-grid"><div className="panel chart-panel"><PanelTitle title="Actividad en el tiempo" subtitle="Número de registros por día · fecha UTC"/><div className="chart-wrap">{ts.length?<ResponsiveContainer width="100%" height={250}><LineChart data={ts}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e8edf4"/><XAxis dataKey="date" tick={{fontSize:11,fill:'#8290a5'}} tickLine={false} axisLine={false}/><YAxis allowDecimals={false} tick={{fontSize:11,fill:'#8290a5'}} tickLine={false} axisLine={false}/><Tooltip/><Line type="monotone" dataKey="count" name="Eventos" stroke="#1e9cf0" strokeWidth={2.5} dot={{r:3,fill:'#1e9cf0'}}/></LineChart></ResponsiveContainer>:<Empty/>}</div></div>
- <div className="panel chart-panel"><PanelTitle title="Distribución por magnitud" subtitle="Cantidad de eventos por rango"/><div className="chart-wrap">{dist.length?<ResponsiveContainer width="100%" height={250}><BarChart data={dist}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e8edf4"/><XAxis dataKey="label" tick={{fontSize:10,fill:'#8290a5'}} tickLine={false} axisLine={false}/><YAxis allowDecimals={false} tick={{fontSize:11,fill:'#8290a5'}} tickLine={false} axisLine={false}/><Tooltip/><Bar dataKey="count" name="Eventos" fill="#1e9cf0" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer>:<Empty/>}</div></div></div>
- <div className="panel"><PanelTitle title="Eventos recientes" subtitle="Últimos registros recibidos" action={<button className="text-action" onClick={()=>onOpen('events')}>Ver catálogo <ArrowUpRight size={14}/></button>}/><EventsTable events={(s.recent||events.slice(0,5)).slice(0,5)}/></div>
- <div className="bottom-grid"><div className="panel"><PanelTitle title="Estado de la plataforma" subtitle="Salud operativa"/><div className="status-row"><span className="status-badge success"><span/>API disponible</span><span className="status-detail">Servicios REST</span></div><div className="status-row"><span className="status-badge info"><span/>Catálogo local</span><span className="status-detail">{n(s.total_events,0)} registros</span></div><div className="status-row"><span className="status-badge warning"><span/>Alertas oficiales</span><span className="status-detail">No habilitadas</span></div></div><div className="panel responsible"><div className="responsible-icon"><ShieldCheck size={21}/></div><div><h3>Información responsable</h3><p>Los modelos estadísticos no pueden predecir con certeza cuándo, dónde ni con qué magnitud ocurrirá un terremoto. Las estimaciones experimentales no son alertas oficiales.</p><button className="text-action" onClick={()=>onOpen('estimates')}>Ver estimaciones <ArrowUpRight size={14}/></button></div></div></div>
+ const [periodo,setPeriodo]=useState<'24h'|'7d'|'30d'>('7d')
+ const ahora=Date.now()
+ const duraciones={
+   '24h':24*60*60*1000,
+   '7d':7*24*60*60*1000,
+   '30d':30*24*60*60*1000
+   }
+ const eventosPeriodo=useMemo(()=>events.filter((e:any)=>{
+   const fecha=new Date(e.occurred_at).getTime()
+   return Number.isFinite(fecha)&&fecha<=ahora&&fecha>=ahora-duraciones[periodo]
+ }),[events,periodo,ahora])
+ const magnitudes=eventosPeriodo.map((e:any)=>Number(e.magnitude)).filter((v:number)=>Number.isFinite(v))
+ const profundidades=eventosPeriodo.map((e:any)=>Number(e.depth_km)).filter((v:number)=>Number.isFinite(v))
+ const promedio=(valores:number[])=>valores.length?valores.reduce((a,b)=>a+b,0)/valores.length:0
+ const profundidadesOrdenadas=[...profundidades].sort((a,b)=>a-b)
+ const mitad=Math.floor(profundidadesOrdenadas.length/2)
+ const mediana=profundidadesOrdenadas.length
+   ?profundidadesOrdenadas.length%2
+     ?profundidadesOrdenadas[mitad]
+     :(profundidadesOrdenadas[mitad-1]+profundidadesOrdenadas[mitad])/2
+   :0
+ const s={
+   total_events:eventosPeriodo.length,
+   recent_events:eventosPeriodo.length,
+   avg_magnitude:promedio(magnitudes),
+   avg_depth:promedio(profundidades),
+   median_depth:mediana,
+   recent:[...eventosPeriodo].sort((a:any,b:any)=>new Date(b.occurred_at).getTime()-new Date(a.occurred_at).getTime()).slice(0,5)
+ }
+ const rangos=[
+   {label:'< 2.0',min:0,max:2},
+   {label:'2.0–2.9',min:2,max:3},
+   {label:'3.0–3.9',min:3,max:4},
+   {label:'4.0–4.9',min:4,max:5},
+   {label:'5.0+',min:5,max:Infinity}
+ ]
+ const dist=rangos.map(r=>({label:r.label,count:magnitudes.filter((m:number)=>m>=r.min&&m<r.max).length}))
+ const conteoPorDia:Record<string,number>={}
+ eventosPeriodo.forEach((e:any)=>{
+   const fecha=new Date(e.occurred_at)
+   const dia=fecha.toISOString().slice(0,10)
+   conteoPorDia[dia]=(conteoPorDia[dia]||0)+1
+ })
+ const ts=Object.entries(conteoPorDia).sort(([a],[b])=>a.localeCompare(b)).map(([date,count])=>({date,count}))
+ const etiquetaPeriodo=periodo==='24h'?'últimas 24 horas':periodo==='7d'?'últimos 7 días':'últimos 30 días'
+ return <>
+ <div className="demo-notice"><span className="notice-icon"><AlertTriangle size={16}/></span><div><b>Modo de demostración</b><span>Los registros de ejemplo están identificados. Sincroniza una fuente para consultar eventos reales publicados por el proveedor.</span></div><button onClick={onSync} disabled={busy}><RefreshCw size={14}/> Sincronizar fuente</button></div>
+ <div className="period-filter"><div><b>Período de consulta</b><small>Mostrando eventos de las {etiquetaPeriodo}</small></div><div className="period-buttons">{([{value:'24h',label:'24 horas'},{value:'7d',label:'7 días'},{value:'30d',label:'30 días'}] as const).map(opcion=><button key={opcion.value} type="button" className={periodo===opcion.value?'selected':''} aria-pressed={periodo===opcion.value} onClick={()=>setPeriodo(opcion.value)}>{opcion.label}</button>)}</div></div>
+ <div className="stat-grid"><Stat label="Eventos registrados" value={n(s.total_events,0)} unit="eventos" change={`En las ${etiquetaPeriodo}`} icon={Waves}/><Stat label="Magnitud media" value={n(s.avg_magnitude,2)} unit="Mw / ML*" change="Promedio del período seleccionado" icon={Activity} tone="cyan"/><Stat label="Profundidad media" value={n(s.avg_depth,1)} unit="km" change={`Mediana ${n(s.median_depth,1)} km`} icon={Layers3} tone="purple"/><Stat label="Fuentes y calidad" value="Monitoreo" unit="" change="Verifica estado de conectores" icon={RadioTower} tone="amber"/></div>
+ <div className="dashboard-grid"><div className="panel chart-panel"><PanelTitle title="Actividad en el tiempo" subtitle={`Número de registros por día · ${etiquetaPeriodo} · fecha UTC`}/><div className="chart-wrap">{ts.length?<ResponsiveContainer width="100%" height={250}><LineChart data={ts}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e8edf4"/><XAxis dataKey="date" tick={{fontSize:11,fill:'#8290a5'}} tickLine={false} axisLine={false}/><YAxis allowDecimals={false} tick={{fontSize:11,fill:'#8290a5'}} tickLine={false} axisLine={false}/><Tooltip/><Line type="monotone" dataKey="count" name="Eventos" stroke="#1e9cf0" strokeWidth={2.5} dot={{r:3,fill:'#1e9cf0'}}/></LineChart></ResponsiveContainer>:<Empty text="No hay eventos en este período."/>}</div></div>
+ <div className="panel chart-panel"><PanelTitle title="Distribución por magnitud" subtitle={`Cantidad de eventos por rango · ${etiquetaPeriodo}`}/><div className="chart-wrap">{eventosPeriodo.length?<ResponsiveContainer width="100%" height={250}><BarChart data={dist}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e8edf4"/><XAxis dataKey="label" tick={{fontSize:10,fill:'#8290a5'}} tickLine={false} axisLine={false}/><YAxis allowDecimals={false} tick={{fontSize:11,fill:'#8290a5'}} tickLine={false} axisLine={false}/><Tooltip/><Bar dataKey="count" name="Eventos" fill="#1e9cf0" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer>:<Empty text="No hay eventos para distribuir por magnitud."/>}</div></div></div>
+ <div className="panel"><PanelTitle title="Eventos recientes" subtitle={`Últimos registros de las ${etiquetaPeriodo}`} action={<button className="text-action" onClick={()=>onOpen('events')}>Ver catálogo <ArrowUpRight size={14}/></button>}/><EventsTable events={s.recent}/></div>
+ <div className="bottom-grid"><div className="panel"><PanelTitle title="Estado de la plataforma" subtitle="Salud operativa"/><div className="status-row"><span className="status-badge success"><span/>API disponible</span><span className="status-detail">Servicios REST</span></div><div className="status-row"><span className="status-badge info"><span/>Catálogo local</span><span className="status-detail">{n(s.total_events,0)} registros en el período</span></div><div className="status-row"><span className="status-badge warning"><span/>Alertas oficiales</span><span className="status-detail">No habilitadas</span></div></div><div className="panel responsible"><div className="responsible-icon"><ShieldCheck size={21}/></div><div><h3>Información responsable</h3><p>Los modelos estadísticos no pueden predecir con certeza cuándo, dónde ni con qué magnitud ocurrirá un terremoto. Las estimaciones experimentales no son alertas oficiales.</p><button className="text-action" onClick={()=>onOpen('estimates')}>Ver estimaciones <ArrowUpRight size={14}/></button></div></div></div>
  <div className="footnote"><Clock3 size={15}/> Última actualización de indicadores: {new Date().toLocaleString('es-PE')} · * Las magnitudes dependen del tipo reportado por cada fuente.</div></>
 }
 function EventsTable({events}:any){return <div className="table-scroll"><table><thead><tr><th>EVENTO / UBICACIÓN</th><th>FECHA UTC</th><th>MAGNITUD</th><th>PROFUNDIDAD</th><th>FUENTE</th><th>ESTADO</th></tr></thead><tbody>{events.length?events.map((e:any)=><tr key={e.id}><td><div className="event-place"><span className={`mag-dot ${e.magnitude>=4?'high':e.magnitude>=3?'mid':'low'}`}/><div><b>{e.place}</b><small>{e.external_id}</small></div></div></td><td>{fmtDate(e.occurred_at)}</td><td><span className={`mag-pill ${e.magnitude>=4?'high':e.magnitude>=3?'mid':'low'}`}>{n(e.magnitude,1)}</span></td><td>{n(e.depth_km,1)} km</td><td><span className="source-name">{e.source}</span></td><td><span className={`review ${e.is_demo?'demo':''}`}>{e.review_status}</span></td></tr>):<tr><td colSpan={6}><Empty/></td></tr>}</tbody></table></div>}
