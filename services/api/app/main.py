@@ -191,14 +191,63 @@ def root(): return {"name":"Sismo Platform Enterprise API","version":"1.0.0","do
 def health(): return {"status":"ok","database":"connected","timestamp":datetime.now(timezone.utc).isoformat()}
 
 @app.get("/api/v1/events")
-def list_events(q: str = "", min_magnitude: Optional[float] = None, source: str = "", limit: int = Query(300, ge=1, le=2000)):
+def list_events(
+    q: str = "",
+    min_magnitude: Optional[float] = Query(None, ge=-1, le=10),
+    max_magnitude: Optional[float] = Query(None, ge=-1, le=10),
+    source: str = "",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    days: Optional[int] = Query(None, ge=1, le=3650),
+    include_demo: bool = True,
+    limit: int = Query(300, ge=1, le=2000),
+):
+    """Lista eventos con filtros opcionales para mapa, revisión y exportación.
+
+    start_date/end_date aceptan fecha ISO (YYYY-MM-DD) o fecha-hora ISO.
+    El filtro temporal se calcula en UTC. Los eventos demo se pueden excluir.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00")) if start_date else None
+        end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00")) if end_date else None
+        if start_dt and start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+        if end_dt and end_dt.tzinfo is None:
+            # Una fecha sin hora debe incluir todo el día indicado.
+            if len(end_date) == 10:
+                end_dt = end_dt + timedelta(days=1) - timedelta(microseconds=1)
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+    except (ValueError, AttributeError):
+        raise HTTPException(422, "start_date y end_date deben usar formato ISO, por ejemplo 2026-10-29.")
+    if min_magnitude is not None and max_magnitude is not None and min_magnitude > max_magnitude:
+        raise HTTPException(422, "min_magnitude no puede ser mayor que max_magnitude.")
+    if start_dt and end_dt and start_dt > end_dt:
+        raise HTTPException(422, "start_date no puede ser posterior a end_date.")
+    if days is not None:
+        cutoff = now - timedelta(days=days)
+        start_dt = max(start_dt, cutoff) if start_dt else cutoff
     with SessionLocal() as db:
-        stmt=select(Event).order_by(Event.occurred_at.desc()).limit(limit)
-        rows=db.scalars(stmt).all()
-        if q: rows=[e for e in rows if q.lower() in e.place.lower() or q.lower() in e.source.lower()]
-        if min_magnitude is not None: rows=[e for e in rows if e.magnitude >= min_magnitude]
-        if source: rows=[e for e in rows if source.lower() in e.source.lower()]
-        return [asdict(e) for e in rows]
+        rows = db.scalars(select(Event).order_by(Event.occurred_at.desc())).all()
+        if q:
+            needle = q.casefold()
+            rows = [e for e in rows if needle in (e.place or "").casefold()
+                    or needle in (e.source or "").casefold()
+                    or needle in (e.external_id or "").casefold()]
+        if min_magnitude is not None:
+            rows = [e for e in rows if e.magnitude >= min_magnitude]
+        if max_magnitude is not None:
+            rows = [e for e in rows if e.magnitude <= max_magnitude]
+        if source:
+            needle = source.casefold()
+            rows = [e for e in rows if needle in (e.source or "").casefold()]
+        if not include_demo:
+            rows = [e for e in rows if not e.is_demo]
+        if start_dt:
+            rows = [e for e in rows if (e.occurred_at.replace(tzinfo=timezone.utc) if e.occurred_at.tzinfo is None else e.occurred_at) >= start_dt]
+        if end_dt:
+            rows = [e for e in rows if (e.occurred_at.replace(tzinfo=timezone.utc) if e.occurred_at.tzinfo is None else e.occurred_at) <= end_dt]
+        return [asdict(e) for e in rows[:limit]]
 
 @app.get("/api/v1/events/{event_id:int}")
 def event_detail(event_id: int):
@@ -208,10 +257,49 @@ def event_detail(event_id: int):
         return asdict(e)
 
 @app.get("/api/v1/events/geojson")
-def geojson():
+def geojson(
+    days: Optional[int] = Query(None, ge=1, le=3650),
+    min_magnitude: Optional[float] = Query(None, ge=-1, le=10),
+    max_magnitude: Optional[float] = Query(None, ge=-1, le=10),
+    include_demo: bool = True,
+    q: str = "",
+):
+    """Devuelve eventos filtrados como GeoJSON (coordenadas en orden longitud, latitud)."""
+    if min_magnitude is not None and max_magnitude is not None and min_magnitude > max_magnitude:
+        raise HTTPException(422, "min_magnitude no puede ser mayor que max_magnitude.")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days) if days is not None else None
+    needle = q.casefold().strip()
     with SessionLocal() as db:
-        rows=db.scalars(select(Event)).all()
-        return {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[e.longitude,e.latitude]},"properties":{"id":e.id,"place":e.place,"magnitude":e.magnitude,"depth_km":e.depth_km,"occurred_at":e.occurred_at.isoformat(),"source":e.source,"is_demo":e.is_demo}} for e in rows]}
+        rows = db.scalars(select(Event).order_by(Event.occurred_at.desc())).all()
+        features = []
+        for e in rows:
+            occurred = e.occurred_at.replace(tzinfo=timezone.utc) if e.occurred_at.tzinfo is None else e.occurred_at.astimezone(timezone.utc)
+            if cutoff and occurred < cutoff:
+                continue
+            if min_magnitude is not None and e.magnitude < min_magnitude:
+                continue
+            if max_magnitude is not None and e.magnitude > max_magnitude:
+                continue
+            if not include_demo and e.is_demo:
+                continue
+            if needle and needle not in " ".join([e.place or "", e.source or "", e.external_id or ""]).casefold():
+                continue
+            if not (-90 <= e.latitude <= 90 and -180 <= e.longitude <= 180):
+                continue
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [e.longitude, e.latitude]},
+                "properties": {
+                    "id": e.id, "external_id": e.external_id, "place": e.place,
+                    "magnitude": e.magnitude, "magnitude_type": e.magnitude_type,
+                    "depth_km": e.depth_km, "occurred_at": occurred.isoformat(),
+                    "source": e.source, "source_url": e.source_url,
+                    "is_demo": e.is_demo, "review_status": e.review_status,
+                },
+            })
+        return {"type": "FeatureCollection", "features": features, "count": len(features),
+                "filters": {"days": days, "min_magnitude": min_magnitude,
+                            "max_magnitude": max_magnitude, "include_demo": include_demo}}
 
 @app.get("/api/v1/dashboard/summary")
 def summary():
@@ -227,7 +315,8 @@ def summary():
             bins[key]+=1
         byday={}
         for e in events:
-            key=e.occurred_at.strftime("%Y-%m-%d"); byday[key]=byday.get(key,0)+1
+            occurred = e.occurred_at.replace(tzinfo=timezone.utc) if e.occurred_at.tzinfo is None else e.occurred_at.astimezone(timezone.utc)
+            key=occurred.strftime("%Y-%m-%d"); byday[key]=byday.get(key,0)+1
         return {"total_events":len(events),"recent_events":len(recent),"avg_magnitude":round(sum(mags)/len(mags),2) if mags else 0,"avg_depth":round(sum(depths)/len(depths),2) if depths else 0,"median_depth":round(median,2),"last_sync":max([e.received_at for e in events]).isoformat() if events else None,"demo_events":sum(1 for e in events if e.is_demo),"magnitude_distribution":[{"label":k,"count":v} for k,v in bins.items()],"timeseries":[{"date":k,"count":v} for k,v in sorted(byday.items())[-14:]],"recent":[asdict(e) for e in sorted(events,key=lambda x:x.occurred_at,reverse=True)[:6]]}
 
 @app.post("/api/v1/sources/sync-usgs")
@@ -325,8 +414,9 @@ def sync_usgs_history(days: int = Query(30, ge=1, le=365), min_magnitude: float 
 def usgs_info():
     return {"name": "USGS Earthquake Catalog (ComCat)",
             "organization": "U.S. Geological Survey", "feed_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
-            "historical_api": "https://earthquake.usgs.gov/fdsnws/event/1/", 
-            "documentation": "https://earthquake.usgs.gov/data/comcat/", 
+            "official_catalog": "https://earthquake.usgs.gov/earthquakes/search/",
+            "historical_api": "https://earthquake.usgs.gov/fdsnws/event/1/",
+            "documentation": "https://earthquake.usgs.gov/data/comcat/",
             "data_note": "Eventos observados/publicados por USGS. Magnitudes, ubicaciones y tiempos pueden revisarse por la fuente.",
             "official_alerts": False}
 
@@ -350,6 +440,34 @@ def analytics():
 @app.get("/api/v1/datasets")
 def datasets():
     with SessionLocal() as db: return [asdict(x) for x in db.scalars(select(Dataset).order_by(Dataset.created_at.desc())).all()]
+
+@app.get("/api/v1/datasets/quality")
+def dataset_quality(include_demo: bool = False):
+    """Resumen de calidad de los eventos registrados; no modifica los datos."""
+    with SessionLocal() as db:
+        stmt = select(Event)
+        if not include_demo:
+            stmt = stmt.where(Event.is_demo == False)
+        rows = db.scalars(stmt).all()
+        total = len(rows)
+        invalid_coordinates = sum(1 for e in rows if not (-90 <= e.latitude <= 90 and -180 <= e.longitude <= 180))
+        invalid_magnitude = sum(1 for e in rows if not math.isfinite(e.magnitude) or not (-1 <= e.magnitude <= 10))
+        invalid_depth = sum(1 for e in rows if not math.isfinite(e.depth_km) or e.depth_km < 0)
+        missing_source_url = sum(1 for e in rows if not e.source_url)
+        duplicate_external_ids = total - len({e.external_id for e in rows})
+        issues = invalid_coordinates + invalid_magnitude + invalid_depth + duplicate_external_ids
+        return {
+            "records": total,
+            "include_demo": include_demo,
+            "valid_coordinates": total - invalid_coordinates,
+            "invalid_coordinates": invalid_coordinates,
+            "invalid_magnitude": invalid_magnitude,
+            "invalid_depth": invalid_depth,
+            "missing_source_url": missing_source_url,
+            "duplicate_external_ids": duplicate_external_ids,
+            "quality_score_percent": round(100 * max(0, total - issues) / total, 2) if total else None,
+            "note": "Indicadores de validación automática; revisar la fuente antes de usar datos en investigación.",
+        }
 @app.post("/api/v1/datasets")
 def create_dataset(payload: dict):
     with SessionLocal() as db:
