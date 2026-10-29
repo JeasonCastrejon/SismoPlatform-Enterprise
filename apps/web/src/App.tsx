@@ -94,6 +94,7 @@ if (active === "users") {
     );
     return;
   }
+
   const role = formExtra || "Solo lectura";
 
   if (!allowedRoles.includes(role)) {
@@ -168,7 +169,7 @@ function Dashboard({summary,events,busy,onSync,onOpen}:any){
    median_depth:mediana,
    recent:[...eventosPeriodo].sort((a:any,b:any)=>new Date(b.occurred_at).getTime()-new Date(a.occurred_at).getTime()).slice(0,5)
  }
-  const rangos=[
+ const rangos=[
    {label:'< 2.0',min:0,max:2},
    {label:'2.0–2.9',min:2,max:3},
    {label:'3.0–3.9',min:3,max:4},
@@ -198,10 +199,12 @@ function EventsTable({events}:any){return <div className="table-scroll"><table><
 function MapPage({events}:any){
  const [period,setPeriod]=useState('30d')
  const [minMagnitude,setMinMagnitude]=useState('0')
+ const [magnitudeBand,setMagnitudeBand]=useState('all')
  const [includeDemo,setIncludeDemo]=useState(false)
  const [search,setSearch]=useState('')
  const now=Date.now()
  const periods:Record<string,number>={'24h':24*60*60*1000,'7d':7*24*60*60*1000,'30d':30*24*60*60*1000,'90d':90*24*60*60*1000,'all':Infinity}
+ const eventTimestamp=(e:any)=>{const raw=e.occurred_at||e.time||e.datetime||e.event_time||e.date; if(raw===undefined||raw===null||raw==='')return NaN; const value=typeof raw==='number'?(raw<1e12?raw*1000:raw):Date.parse(String(raw)); return Number.isFinite(value)?value:NaN}
  const validEvents=useMemo(()=>{
    const seen=new Set<string>()
    return (Array.isArray(events)?events:[]).filter((e:any)=>{
@@ -213,10 +216,11 @@ function MapPage({events}:any){
    })
  },[events])
  const filtered=useMemo(()=>validEvents.filter((e:any)=>{
-   const date=new Date(e.occurred_at).getTime()
+   const date=eventTimestamp(e),mag=Number(e.magnitude)
    const inPeriod=period==='all'||(Number.isFinite(date)&&date<=now&&date>=now-periods[period])
-   return inPeriod&&Number(e.magnitude)>=Number(minMagnitude)&&(includeDemo||!e.is_demo)&&(!search||`${e.place||''} ${e.source||''} ${e.external_id||''}`.toLowerCase().includes(search.toLowerCase()))
- }),[validEvents,period,minMagnitude,includeDemo,search,now])
+   const inBand=magnitudeBand==='all'||(magnitudeBand==='small'&&mag<3)||(magnitudeBand==='medium'&&mag>=3&&mag<4)||(magnitudeBand==='large'&&mag>=4)
+   return inPeriod&&inBand&&mag>=Number(minMagnitude)&&(includeDemo||!(e.is_demo===true||e.is_demo===1||e.is_demo==='true'))&&(!search||`${e.place||''} ${e.source||''} ${e.external_id||''}`.toLowerCase().includes(search.toLowerCase()))
+ }),[validEvents,period,minMagnitude,magnitudeBand,includeDemo,search,now])
  const center=filtered.length?([filtered.reduce((a:number,e:any)=>a+Number(e.latitude),0)/filtered.length,filtered.reduce((a:number,e:any)=>a+Number(e.longitude),0)/filtered.length] as [number,number]):([-12.3,-76.5] as [number,number])
  return <div className="panel map-panel"><PanelTitle title="Mapa sísmico" subtitle="Un solo mapa con filtros sobre los eventos sísmicos disponibles."/>
   <div className="filterbar" style={{flexWrap:'wrap'}}>
@@ -226,8 +230,8 @@ function MapPage({events}:any){
    <label style={{display:'flex',alignItems:'center',gap:8}}><input type="checkbox" checked={includeDemo} onChange={e=>setIncludeDemo(e.target.checked)}/> Incluir demostración</label>
    <span className="result-count">{filtered.length} puntos únicos</span>
   </div>
-  <div className="map-legend"><span><i className="legend-dot small"/> Magnitud menor a 3</span><span><i className="legend-dot medium"/> 3.0–3.9</span><span><i className="legend-dot large"/> 4.0 o más</span></div>
-  <MapContainer key={`${period}-${minMagnitude}-${includeDemo}`} center={center} zoom={4} scrollWheelZoom style={{height:'520px',width:'100%',borderRadius:'12px'}}><TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{filtered.map((e:any)=><CircleMarker key={String(e.external_id||e.id)} center={[Number(e.latitude),Number(e.longitude)]} radius={Math.max(4,Math.min(14,Number(e.magnitude)*2.2))} pathOptions={{color:Number(e.magnitude)>=4?'#e45d70':Number(e.magnitude)>=3?'#e6a23c':'#168ee0',fillOpacity:.65}}><Popup><b>{e.place||'Ubicación no indicada'}</b><br/>Magnitud: {n(e.magnitude,1)}<br/>Profundidad: {n(e.depth_km,1)} km<br/>{fmtDate(e.occurred_at)}<br/>Fuente: {e.source||'No indicada'}{e.is_demo?' · DEMO':''}{e.source_url&&<><br/><a href={e.source_url} target="_blank" rel="noreferrer">Abrir evento original</a></>}</Popup></CircleMarker>)}</MapContainer>
+  <div className="map-legend" aria-label="Filtrar por rango de magnitud"><button type="button" aria-pressed={magnitudeBand==='all'} className={magnitudeBand==='all'?'legend-filter selected':'legend-filter'} style={{border: magnitudeBand==='all'?'1px solid #168ee0':'1px solid #d8e1eb',background:magnitudeBand==='all'?'#edf7ff':'#fff',borderRadius:8,padding:'6px 10px',cursor:'pointer'}} onClick={()=>setMagnitudeBand('all')}>Todas las magnitudes</button><button type="button" aria-pressed={magnitudeBand==='small'} className={magnitudeBand==='small'?'legend-filter selected':'legend-filter'} style={{border: magnitudeBand==='small'?'1px solid #168ee0':'1px solid #d8e1eb',background:magnitudeBand==='small'?'#edf7ff':'#fff',borderRadius:8,padding:'6px 10px',cursor:'pointer'}} onClick={()=>setMagnitudeBand(magnitudeBand==='small'?'all':'small')}><i className="legend-dot small"/> Menor a 3</button><button type="button" aria-pressed={magnitudeBand==='medium'} className={magnitudeBand==='medium'?'legend-filter selected':'legend-filter'} style={{border: magnitudeBand==='medium'?'1px solid #168ee0':'1px solid #d8e1eb',background:magnitudeBand==='medium'?'#edf7ff':'#fff',borderRadius:8,padding:'6px 10px',cursor:'pointer'}} onClick={()=>setMagnitudeBand(magnitudeBand==='medium'?'all':'medium')}><i className="legend-dot medium"/> 3.0–3.9</button><button type="button" aria-pressed={magnitudeBand==='large'} className={magnitudeBand==='large'?'legend-filter selected':'legend-filter'} style={{border: magnitudeBand==='large'?'1px solid #168ee0':'1px solid #d8e1eb',background:magnitudeBand==='large'?'#edf7ff':'#fff',borderRadius:8,padding:'6px 10px',cursor:'pointer'}} onClick={()=>setMagnitudeBand(magnitudeBand==='large'?'all':'large')}><i className="legend-dot large"/> 4.0 o más</button></div>
+  <MapContainer key={`${period}-${minMagnitude}-${magnitudeBand}-${includeDemo}`} center={center} zoom={4} minZoom={2} maxBounds={[[-85,-180],[85,180]]} maxBoundsViscosity={1} scrollWheelZoom style={{height:'520px',width:'100%',borderRadius:'12px'}}><TileLayer noWrap attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{filtered.map((e:any)=><CircleMarker key={String(e.external_id||e.id)} center={[Number(e.latitude),Number(e.longitude)]} radius={Math.max(4,Math.min(14,Number(e.magnitude)*2.2))} pathOptions={{color:Number(e.magnitude)>=4?'#e45d70':Number(e.magnitude)>=3?'#e6a23c':'#168ee0',fillOpacity:.65}}><Popup><b>{e.place||'Ubicación no indicada'}</b><br/>Magnitud: {n(e.magnitude,1)}<br/>Profundidad: {n(e.depth_km,1)} km<br/>{fmtDate(e.occurred_at)}<br/>Fuente: {e.source||'No indicada'}{e.is_demo?' · DEMO':''}{e.source_url&&<><br/><a href={e.source_url} target="_blank" rel="noreferrer">Abrir evento original</a></>}</Popup></CircleMarker>)}</MapContainer>
   {!filtered.length&&<Empty text="No hay eventos con coordenadas que coincidan con los filtros."/>}
   <p className="map-disclaimer"><AlertTriangle size={14}/> Los puntos representan ubicaciones reportadas; no representan pronósticos ni zonas de impacto. El filtro solo cambia los eventos visibles.</p>
  </div>
@@ -243,7 +247,7 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
       .toLowerCase()
       .includes("usgs");
 
- return {
+    return {
       ...r,
       officialUrl: isUsgs
         ? "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
@@ -317,7 +321,8 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
           icon={CheckCircle2}
           tone="cyan"
         />
-                <Stat
+
+        <Stat
           label="Con errores"
           value={String(
             sources.filter((s: any) =>
@@ -381,7 +386,7 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
         </button>
       </div>
 
-        <div className="table-scroll">
+      <div className="table-scroll">
         <table>
           <thead>
             <tr>
@@ -448,7 +453,8 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
                       ? "Manual"
                       : "Pendiente de configurar"}
                   </td>
-                   <td>{fmtDate(s.last_sync_at)}</td>
+
+                  <td>{fmtDate(s.last_sync_at)}</td>
 
                   <td>
                     {s.status === "Disponible"
@@ -490,7 +496,7 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
                       "Sin registros de ejecución"}
                   </td>
                 </tr>
- ))
+              ))
             ) : (
               <tr>
                 <td colSpan={12}>
@@ -529,7 +535,7 @@ function DataPage({active,rows,events: eventRowsProp=[],onRefresh,notify}:any){
    const csv=[cols.join(','),...prepared.map((e:any)=>cols.map(k=>cell(e[k])).join(','))].join('\r\n')
    const url=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));const a=document.createElement('a');a.href=url;a.download='dataset_sismico_preparado.csv';a.click();URL.revokeObjectURL(url);notify(`CSV preparado: ${prepared.length} eventos exportados.`)
  }
-  if (active === "sources") {
+ if (active === "sources") {
    return <SourcesPage rows={rows} onRefresh={onRefresh} notify={notify} />;
  }
  const magnitudes=eventRows.map((e:any)=>Number(e.magnitude)).filter((v:number)=>Number.isFinite(v))
@@ -569,7 +575,8 @@ function Reports({ onDownload, events }: any) {
       const text = String(value ?? "");
       return `"${text.replace(/"/g, '""')}"`;
     };
-  const csv = [
+
+    const csv = [
       columns.join(","),
       ...filteredEvents.map((event: any) =>
         columns.map((column) => escapeCSV(event[column])).join(",")
@@ -609,7 +616,8 @@ function Reports({ onDownload, events }: any) {
           icon={BarChart3}
           tone="cyan"
         />
- <Stat
+
+        <Stat
           label="Fecha de generación"
           value={new Date().toLocaleDateString("es-PE")}
           unit=""
@@ -670,7 +678,7 @@ function Reports({ onDownload, events }: any) {
             className="btn btn-secondary"
             onClick={onDownload}
           >
-             <Database size={16} />
+            <Database size={16} />
             Exportar catálogo completo del servidor
           </button>
         </div>
@@ -729,6 +737,7 @@ function Reports({ onDownload, events }: any) {
     </>
   );
 }
+
 function AuditPage({
   rows,
   onRefresh,
@@ -852,7 +861,8 @@ function AuditPage({
           </tbody>
         </table>
       </div>
-<p className="footnote">
+
+      <p className="footnote">
         Esta pantalla filtra los registros recibidos. La integridad,
         retención y protección contra modificaciones de la bitácora
         deben garantizarse en el backend.
@@ -924,7 +934,8 @@ function ConfigurationPage() {
               change="Versión publicada por la API"
               icon={Settings}
             />
-<Stat
+
+            <Stat
               label="Entorno"
               value={config.environment || "No indicado"}
               unit=""
