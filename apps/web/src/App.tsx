@@ -146,7 +146,300 @@ function Dashboard({summary,events,busy,onSync,onOpen}:any){
 function EventsTable({events}:any){return <div className="table-scroll"><table><thead><tr><th>EVENTO / UBICACIÓN</th><th>FECHA UTC</th><th>MAGNITUD</th><th>PROFUNDIDAD</th><th>FUENTE</th><th>ESTADO</th></tr></thead><tbody>{events.length?events.map((e:any)=><tr key={e.id}><td><div className="event-place"><span className={`mag-dot ${e.magnitude>=4?'high':e.magnitude>=3?'mid':'low'}`}/><div><b>{e.place}</b><small>{e.external_id}</small></div></div></td><td>{fmtDate(e.occurred_at)}</td><td><span className={`mag-pill ${e.magnitude>=4?'high':e.magnitude>=3?'mid':'low'}`}>{n(e.magnitude,1)}</span></td><td>{n(e.depth_km,1)} km</td><td><span className="source-name">{e.source}</span></td><td><span className={`review ${e.is_demo?'demo':''}`}>{e.review_status}</span></td></tr>):<tr><td colSpan={6}><Empty/></td></tr>}</tbody></table></div>}
 function MapPage({events}:any){return <div className="panel map-panel"><PanelTitle title="Mapa de eventos" subtitle="Ubicaciones publicadas por las fuentes seleccionadas"/><div className="map-legend"><span><i className="legend-dot small"/> Magnitud menor a 3</span><span><i className="legend-dot medium"/> 3.0–3.9</span><span><i className="legend-dot large"/> 4.0 o más</span><span className="map-count">{events.length} puntos</span></div><MapContainer center={[-12.3,-76.5]} zoom={4} scrollWheelZoom style={{height:'520px',width:'100%',borderRadius:'12px'}}><TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{events.map((e:any)=><CircleMarker key={e.id} center={[e.latitude,e.longitude]} radius={Math.max(5,Math.min(14,e.magnitude*2.2))} pathOptions={{color:e.magnitude>=4?'#e45d70':e.magnitude>=3?'#e6a23c':'#168ee0',fillOpacity:.65}}><Popup><b>{e.place}</b><br/>Magnitud: {e.magnitude}<br/>Profundidad: {e.depth_km} km<br/>{fmtDate(e.occurred_at)}<br/>Fuente: {e.source}{e.is_demo?' · DEMO':''}</Popup></CircleMarker>)}</MapContainer><p className="map-disclaimer"><AlertTriangle size={14}/> Los puntos representan ubicaciones reportadas; no representan pronósticos ni zonas de impacto.</p></div>}
 function AnalysisPage({data,summary}:any){const a=data||{};return <><div className="stat-grid"><Stat label="Tamaño de muestra" value={n(a.count,0)} unit="eventos" change="Registros disponibles" icon={Database}/><Stat label="Magnitud media" value={n(a.mean_magnitude,2)} unit="" change="Media aritmética" icon={Activity} tone="cyan"/><Stat label="Magnitud mediana" value={n(a.median_magnitude,2)} unit="" change="Centro de la distribución" icon={BarChart3} tone="purple"/><Stat label="Profundidad media" value={n(a.mean_depth,1)} unit="km" change="Variable descriptiva" icon={Layers3} tone="amber"/></div><div className="panel"><PanelTitle title="Magnitud frente a profundidad" subtitle="Cada punto es un evento del catálogo; X = profundidad (km), Y = magnitud"/><div className="scatter">{(a.scatter||[]).map((p:any,i:number)=><div key={i} className="scatter-row"><span>{p.place}</span><div className="scatter-track"><i style={{left:`${Math.min(96,Math.max(1,(p.x/Math.max(1,...(a.scatter||[]).map((x:any)=>x.x)))*100))}%`}} title={`${p.x} km / M ${p.y}`}/></div><b>{n(p.x,1)} km · M {n(p.y,1)}</b></div>)}</div><div className="footnote"><AlertTriangle size={15}/>{a.warning||'El análisis es descriptivo. Correlación no implica causalidad.'} Correlación de Pearson: {a.correlation===null||a.correlation===undefined?'No disponible':n(a.correlation,3)}.</div></div><div className="panel"><PanelTitle title="Distribución por rango" subtitle="Frecuencia de los registros guardados"/><div className="chart-wrap"><ResponsiveContainer width="100%" height={250}><BarChart data={summary?.magnitude_distribution||[]}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="label"/><YAxis allowDecimals={false}/><Tooltip/><Bar dataKey="count" fill="#35b6b0" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer></div></div></>}
+
+function SourcesPage({ rows, onRefresh, notify }: any) {
+  const [running, setRunning] = useState(false);
+  const [days, setDays] = useState("30");
+
+  const sources = rows.map((r: any) => {
+    const isUsgs = String(r.name || "")
+      .toLowerCase()
+      .includes("usgs");
+
+    return {
+      ...r,
+      officialUrl: isUsgs
+        ? "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+        : r.base_url || "https://www.igp.gob.pe/",
+      docsUrl: isUsgs
+        ? "https://earthquake.usgs.gov/data/comcat/"
+        : "https://www.igp.gob.pe/",
+      isUsgs,
+    };
+  });
+
+  const sync = async (history = false) => {
+    if (running) return;
+
+    setRunning(true);
+
+    try {
+      const endpoint = history
+        ? `/api/v1/sources/sync-usgs-history?days=${encodeURIComponent(days)}&min_magnitude=2.5`
+        : "/api/v1/sources/sync-usgs";
+
+      const result = await post(endpoint);
+
+      notify(
+        result.message || "Sincronización finalizada."
+      );
+
+      await onRefresh();
+    } catch (error: any) {
+      notify(
+        error.message || "No se pudo sincronizar la fuente."
+      );
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="panel">
+      <PanelTitle
+        title="Administrar conectores"
+        subtitle="Procedencia, sincronización, estado y confiabilidad de la ingesta."
+        action={
+          <button
+            className="btn btn-secondary btn-small"
+            onClick={onRefresh}
+            disabled={running}
+          >
+            <RefreshCw size={14} />
+            Actualizar estado
+          </button>
+        }
+      />
+
+      <div className="stat-grid">
+        <Stat
+          label="Conectores registrados"
+          value={String(sources.length)}
+          change="Fuentes configuradas"
+          icon={Database}
+        />
+
+        <Stat
+          label="Disponibles"
+          value={String(
+            sources.filter(
+              (s: any) => s.status === "Disponible"
+            ).length
+          )}
+          change="Según el estado registrado"
+          icon={CheckCircle2}
+          tone="cyan"
+        />
+
+        <Stat
+          label="Con errores"
+          value={String(
+            sources.filter((s: any) =>
+              String(s.status || "")
+                .toLowerCase()
+                .includes("error")
+            ).length
+          )}
+          change="Requieren revisión"
+          icon={AlertTriangle}
+          tone="amber"
+        />
+
+        <Stat
+          label="Credenciales"
+          value="Protegidas"
+          change="No mostrar claves en pantalla"
+          icon={ShieldCheck}
+          tone="purple"
+        />
+      </div>
+
+      <div
+        className="inline-actions"
+        style={{ flexWrap: "wrap", margin: "16px 0" }}
+      >
+        <button
+          className="btn btn-primary"
+          disabled={running}
+          onClick={() => sync(false)}
+        >
+          <RefreshCw size={15} />
+          {running
+            ? "Sincronizando..."
+            : "Sincronizar USGS (última hora)"}
+        </button>
+
+        <label>
+          Histórico (días)
+          <select
+            value={days}
+            onChange={(e) => setDays(e.target.value)}
+            disabled={running}
+            style={{ padding: 8, borderRadius: 8 }}
+          >
+            <option value="7">7 días</option>
+            <option value="30">30 días</option>
+            <option value="90">90 días</option>
+            <option value="180">180 días</option>
+            <option value="365">365 días</option>
+          </select>
+        </label>
+
+        <button
+          className="btn btn-secondary"
+          disabled={running}
+          onClick={() => sync(true)}
+        >
+          <Clock3 size={15} />
+          Importar histórico
+        </button>
+      </div>
+
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Nombre / organización</th>
+              <th>URL / API</th>
+              <th>Tipo</th>
+              <th>Frecuencia</th>
+              <th>Última ejecución</th>
+              <th>Último éxito</th>
+              <th>Latencia</th>
+              <th>Estado</th>
+              <th>Límites / licencia</th>
+              <th>Contacto</th>
+              <th>Secreto referenciado</th>
+              <th>Último registro</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {sources.length > 0 ? (
+              sources.map((s: any) => (
+                <tr key={s.id || s.name}>
+                  <td>
+                    <strong>{s.name}</strong>
+                    <div>
+                      {s.organization ||
+                        (s.isUsgs
+                          ? "United States Geological Survey"
+                          : "Organización por verificar")}
+                    </div>
+                  </td>
+
+                  <td>
+                    <a
+                      href={s.officialUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-action"
+                    >
+                      Abrir fuente original
+                      <ExternalLink size={12} />
+                    </a>
+
+                    <div>
+                      <a
+                        href={s.docsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-action"
+                      >
+                        Documentación oficial
+                      </a>
+                    </div>
+
+                    <small style={{ overflowWrap: "anywhere" }}>
+                      {s.officialUrl}
+                    </small>
+                  </td>
+
+                  <td>{s.source_type || "HTTP / GeoJSON"}</td>
+
+                  <td>
+                    {s.isUsgs
+                      ? "Manual"
+                      : "Pendiente de configurar"}
+                  </td>
+
+                  <td>{fmtDate(s.last_sync_at)}</td>
+
+                  <td>
+                    {s.status === "Disponible"
+                      ? fmtDate(s.last_sync_at)
+                      : "Sin confirmar"}
+                  </td>
+
+                  <td>No medida</td>
+
+                  <td>
+                    <span className="review">
+                      {s.status || "Pendiente"}
+                    </span>
+                  </td>
+
+                  <td>
+                    {s.isUsgs
+                      ? "Feed público; verificar condiciones vigentes"
+                      : "Verificar límites y licencia"}
+                  </td>
+
+                  <td>
+                    {s.isUsgs
+                      ? "USGS ComCat"
+                      : "Consultar web oficial"}
+                  </td>
+
+                  <td>
+                    <code>
+                      {s.isUsgs
+                        ? "USGS_API_TOKEN (si aplica)"
+                        : "IGP_API_KEY (si aplica)"}
+                    </code>
+                    <div>No exponer el valor secreto</div>
+                  </td>
+
+                  <td>
+                    {s.last_message ||
+                      "Sin registros de ejecución"}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={12}>
+                  No hay conectores registrados en la API.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="footnote" style={{ marginTop: 16 }}>
+        <ShieldCheck size={16} />
+        Los secretos deben configurarse en el backend o en
+        un gestor de secretos. No se deben guardar en el
+        frontend ni en los logs. El conector IGP necesita
+        una integración de API verificada antes de sincronizar.
+      </div>
+    </div>
+  );
+}
+
 function DataPage({active,rows,onRefresh,notify}:any){
+  
+  if (active === "sources") {
+    return (
+      <SourcesPage
+        rows={rows}
+        onRefresh={onRefresh}
+        notify={notify}
+      />
+    );
+  }
+
  const configs:Record<string,{title:string,sub:string,cols:string[]}>={datasets:{title:'Conjuntos de datos',sub:'Versiones, tamaño de muestra y validación básica.',cols:['name','source','version','row_count','null_count','status']},ml:{title:'Registro de experimentos',sub:'Trazabilidad de algoritmos, variables y limitaciones.',cols:['name','task_type','algorithm','target','status','created_at']},estimates:{title:'Estimaciones experimentales',sub:'Indicadores exploratorios; no constituyen alertas oficiales.',cols:['model_name','area','metric_name','value','disclaimer','created_at']},rules:{title:'Reglas configuradas',sub:'Umbrales que se aplican a eventos recibidos del proveedor.',cols:['name','min_magnitude','zone','severity','enabled']},alerts:{title:'Bandeja de alertas internas',sub:'Avisos generados por reglas; no se envían a canales públicos.',cols:['title','severity','status','channel','created_at']},sources:{title:'Fuentes registradas',sub:'Procedencia, estado y última sincronización de conectores.',cols:['name','organization','source_type','status','last_sync_at','last_message']},users:{title:'Directorio de usuarios',sub:'Roles de referencia. La autenticación real debe completarse antes de producción.',cols:['full_name','email','role','status','created_at']},audit:{title:'Bitácora de auditoría',sub:'Registro de acciones administrativas y operativas.',cols:['actor','action','entity_type','entity_id','detail','occurred_at']}}
  const c=configs[active]
  const headers:Record<string,string>={name:'Nombre',source:'Fuente',version:'Versión',row_count:'Filas',null_count:'Nulos',status:'Estado',task_type:'Tipo de tarea',algorithm:'Algoritmo',target:'Variable objetivo',created_at:'Fecha',model_name:'Modelo',area:'Zona',metric_name:'Indicador',value:'Valor',disclaimer:'Advertencia',min_magnitude:'Magnitud mínima',zone:'Zona',severity:'Severidad',enabled:'Activa',title:'Título',channel:'Canal',organization:'Organización',source_type:'Tipo',last_sync_at:'Última sincronización',last_message:'Mensaje',full_name:'Nombre',email:'Correo',role:'Rol',actor:'Usuario',action:'Acción',entity_type:'Entidad',entity_id:'ID',detail:'Detalle',occurred_at:'Fecha UTC'}
