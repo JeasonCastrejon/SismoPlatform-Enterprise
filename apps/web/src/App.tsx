@@ -9,7 +9,6 @@ const modules = [
   {id:'dashboard',label:'Dashboard',icon:Gauge,group:'OPERACIÓN'},
   {id:'events',label:'Eventos sísmicos',icon:Waves,group:'OPERACIÓN'},
   {id:'map',label:'Mapa sísmico',icon:MapPinned,group:'OPERACIÓN'},
-  {id:'analysis',label:'Análisis estadístico',icon:BarChart3,group:'ANÁLISIS'},
   {id:'datasets',label:'Preparación de datos',icon:Database,group:'ANÁLISIS'},
   {id:'ml',label:'Modelos de Machine Learning',icon:BrainCircuit,group:'ANÁLISIS'},
   {id:'estimates',label:'Estimaciones experimentales',icon:Activity,group:'ANÁLISIS'},
@@ -40,15 +39,15 @@ const n = (v:any,d=1) => Number(v||0).toLocaleString('es-PE',{maximumFractionDig
 const colors = ['#1e9cf0','#35c6b4','#7b8cff','#f0ae4e','#ec7188']
 function App(){
   const [active,setActive]=useState('dashboard'),[collapsed,setCollapsed]=useState(false),[mobile,setMobile]=useState(false)
-  const [summary,setSummary]=useState<AnyRow|null>(null),[events,setEvents]=useState<AnyRow[]>([]),[analysis,setAnalysis]=useState<AnyRow|null>(null)
+  const [summary,setSummary]=useState<AnyRow|null>(null),[events,setEvents]=useState<AnyRow[]>([])
   const [rows,setRows]=useState<AnyRow[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[toast,setToast]=useState('')
   const [search,setSearch]=useState(''),[minMag,setMinMag]=useState(''),[formOpen,setFormOpen]=useState(false),[formName,setFormName]=useState(''),[formExtra,setFormExtra]=useState('')
   const [health,setHealth]=useState(false)
   const refresh = useCallback(async()=>{
     setBusy(true);setError('')
     try{
-      const [s,e,a,h]=await Promise.all([get('/api/v1/dashboard/summary'),get('/api/v1/events'),get('/api/v1/analytics/summary'),get('/api/v1/health')])
-      setSummary(s);setEvents(e);setAnalysis(a);setHealth(h.status==='ok')
+      const [s,e,h]=await Promise.all([get('/api/v1/dashboard/summary'),get('/api/v1/events'),get('/api/v1/health')])
+      setSummary(s);setEvents(Array.isArray(e)?e:(e.items||e.events||[]));setHealth(h.status==='ok')
       const map:Record<string,string>={datasets:'/api/v1/datasets',ml:'/api/v1/ml/experiments',estimates:'/api/v1/estimates',rules:'/api/v1/alert-rules',alerts:'/api/v1/alerts',sources:'/api/v1/sources',users:'/api/v1/users',audit:'/api/v1/audit-logs'}
       if(map[active]) setRows(await get(map[active]))
     }catch(e:any){setError(e.message||'No se pudo conectar con la API.');setHealth(false)}finally{setBusy(false)}
@@ -95,7 +94,6 @@ if (active === "users") {
     );
     return;
   }
-
   const role = formExtra || "Solo lectura";
 
   if (!allowedRoles.includes(role)) {
@@ -127,8 +125,8 @@ if (active === "users") {
         {active==='dashboard'&&<Dashboard summary={summary} events={events} busy={busy} onSync={sync} onOpen={setActive}/>}
         {active==='events'&&<><div className="filterbar"><div className="searchbox"><Search size={17}/><input placeholder="Buscar por ubicación, fuente o ID..." value={search} onChange={e=>setSearch(e.target.value)}/></div><label>Magnitud mínima <select value={minMag} onChange={e=>setMinMag(e.target.value)}><option value="">Todas</option><option value="2">2.0+</option><option value="3">3.0+</option><option value="4">4.0+</option><option value="5">5.0+</option></select></label><span className="result-count">{filtered.length} eventos</span></div><div className="panel"><PanelTitle title="Catálogo de eventos" subtitle="Eventos observados con procedencia y estado de revisión"/><EventsTable events={filtered}/></div></>}
         {active==='map'&&<MapPage events={events}/>}
-        {active==='analysis'&&<AnalysisPage data={analysis} summary={summary}/>}
-        {['datasets','ml','estimates','rules','alerts','sources','users','audit'].includes(active)&&<DataPage active={active} rows={rows} onRefresh={refresh} notify={notify}/>}
+
+        {['datasets','ml','estimates','rules','alerts','sources','users','audit'].includes(active)&&<DataPage active={active} rows={rows} events={events} onRefresh={refresh} notify={notify}/>}
         {active==='reports'&&<Reports onDownload={downloadReport} events={events}/>}
         {active==='audit'&&<div className="footnote"><ShieldCheck size={16}/> La bitácora registra acciones del sistema. Esta versión es una base funcional de demostración; para producción debe reforzarse la identidad y autorización en servidor.</div>}
         <footer className="footer"><span>© 2026 Sismo Platform Enterprise</span><span><span className="footer-dot"/> Datos y estimaciones con trazabilidad</span><span>Versión 1.0.0 · <a href={`${API}/docs`} target="_blank" rel="noreferrer">Documentación API <ExternalLink size={11}/></a></span></footer>
@@ -137,7 +135,7 @@ if (active === "users") {
     {toast&&<div className="toast"><CheckCircle2 size={18}/>{toast}</div>}
   </div>
 }
-function pageDescription(id:string){const d:Record<string,string>={dashboard:'Indicadores ejecutivos de actividad sísmica registrada y estado de la plataforma.',events:'Consulta, filtra y revisa los metadatos de cada evento y su fuente original.',map:'Exploración geográfica de eventos observados. El mapa no representa zonas de impacto.',analysis:'Estadística descriptiva reproducible sobre el catálogo de eventos registrado.',datasets:'Control de calidad y versionado inicial de conjuntos de datos para análisis.',ml:'Registro trazable de experimentos y evaluación supervisada.',estimates:'Resultados exploratorios con contexto, fecha y advertencia científica.',rules:'Define umbrales internos aplicados a eventos recibidos.',alerts:'Seguimiento de avisos internos, revisión y trazabilidad.',sources:'Conectores de datos, estado de sincronización y procedencia.',reports:'Exportación de datos y reportes operativos con fecha de corte.',users:'Usuarios de referencia y roles sugeridos para control de acceso.',audit:'Historial de acciones y parámetros operativos.'};return d[id]||'Gestión de la plataforma de monitoreo sísmico.'}
+function pageDescription(id:string){const d:Record<string,string>={dashboard:'Indicadores ejecutivos de actividad sísmica registrada y estado de la plataforma.',events:'Consulta, filtra y revisa los metadatos de cada evento y su fuente original.',map:'Exploración geográfica con filtros por fecha, magnitud y calidad de coordenadas.',datasets:'Control de calidad y versionado inicial de conjuntos de datos para análisis.',ml:'Registro trazable de experimentos y evaluación supervisada.',estimates:'Resultados exploratorios con contexto, fecha y advertencia científica.',rules:'Define umbrales internos aplicados a eventos recibidos.',alerts:'Seguimiento de avisos internos, revisión y trazabilidad.',sources:'Conectores de datos, estado de sincronización y procedencia.',reports:'Exportación de datos y reportes operativos con fecha de corte.',users:'Usuarios de referencia y roles sugeridos para control de acceso.',audit:'Historial de acciones y parámetros operativos.'};return d[id]||'Gestión de la plataforma de monitoreo sísmico.'}
 function PanelTitle({title,subtitle,action}:{title:string,subtitle:string,action?:any}){return <div className="panel-title"><div><h3>{title}</h3><p>{subtitle}</p></div>{action}</div>}
 function Stat({label,value,unit,change,icon:Icon,tone='blue'}:any){return <div className="stat-card"><div className={`stat-icon ${tone}`}><Icon size={19}/></div><div className="stat-label">{label}</div><div className="stat-value">{value}<small>{unit}</small></div><div className="stat-foot">{change}</div></div>}
 function Dashboard({summary,events,busy,onSync,onOpen}:any){
@@ -170,7 +168,7 @@ function Dashboard({summary,events,busy,onSync,onOpen}:any){
    median_depth:mediana,
    recent:[...eventosPeriodo].sort((a:any,b:any)=>new Date(b.occurred_at).getTime()-new Date(a.occurred_at).getTime()).slice(0,5)
  }
- const rangos=[
+  const rangos=[
    {label:'< 2.0',min:0,max:2},
    {label:'2.0–2.9',min:2,max:3},
    {label:'3.0–3.9',min:3,max:4},
@@ -197,7 +195,43 @@ function Dashboard({summary,events,busy,onSync,onOpen}:any){
  <div className="footnote"><Clock3 size={15}/> Última actualización de indicadores: {new Date().toLocaleString('es-PE')} · * Las magnitudes dependen del tipo reportado por cada fuente.</div></>
 }
 function EventsTable({events}:any){return <div className="table-scroll"><table><thead><tr><th>EVENTO / UBICACIÓN</th><th>FECHA UTC</th><th>MAGNITUD</th><th>PROFUNDIDAD</th><th>FUENTE</th><th>ESTADO</th></tr></thead><tbody>{events.length?events.map((e:any)=><tr key={e.id}><td><div className="event-place"><span className={`mag-dot ${e.magnitude>=4?'high':e.magnitude>=3?'mid':'low'}`}/><div><b>{e.place}</b><small>{e.external_id}</small></div></div></td><td>{fmtDate(e.occurred_at)}</td><td><span className={`mag-pill ${e.magnitude>=4?'high':e.magnitude>=3?'mid':'low'}`}>{n(e.magnitude,1)}</span></td><td>{n(e.depth_km,1)} km</td><td><span className="source-name">{e.source}</span></td><td><span className={`review ${e.is_demo?'demo':''}`}>{e.review_status}</span></td></tr>):<tr><td colSpan={6}><Empty/></td></tr>}</tbody></table></div>}
-function MapPage({events}:any){return <div className="panel map-panel"><PanelTitle title="Mapa de eventos" subtitle="Ubicaciones publicadas por las fuentes seleccionadas"/><div className="map-legend"><span><i className="legend-dot small"/> Magnitud menor a 3</span><span><i className="legend-dot medium"/> 3.0–3.9</span><span><i className="legend-dot large"/> 4.0 o más</span><span className="map-count">{events.length} puntos</span></div><MapContainer center={[-12.3,-76.5]} zoom={4} scrollWheelZoom style={{height:'520px',width:'100%',borderRadius:'12px'}}><TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{events.map((e:any)=><CircleMarker key={e.id} center={[e.latitude,e.longitude]} radius={Math.max(5,Math.min(14,e.magnitude*2.2))} pathOptions={{color:e.magnitude>=4?'#e45d70':e.magnitude>=3?'#e6a23c':'#168ee0',fillOpacity:.65}}><Popup><b>{e.place}</b><br/>Magnitud: {e.magnitude}<br/>Profundidad: {e.depth_km} km<br/>{fmtDate(e.occurred_at)}<br/>Fuente: {e.source}{e.is_demo?' · DEMO':''}</Popup></CircleMarker>)}</MapContainer><p className="map-disclaimer"><AlertTriangle size={14}/> Los puntos representan ubicaciones reportadas; no representan pronósticos ni zonas de impacto.</p></div>}
+function MapPage({events}:any){
+ const [period,setPeriod]=useState('30d')
+ const [minMagnitude,setMinMagnitude]=useState('0')
+ const [includeDemo,setIncludeDemo]=useState(false)
+ const [search,setSearch]=useState('')
+ const now=Date.now()
+ const periods:Record<string,number>={'24h':24*60*60*1000,'7d':7*24*60*60*1000,'30d':30*24*60*60*1000,'90d':90*24*60*60*1000,'all':Infinity}
+ const validEvents=useMemo(()=>{
+   const seen=new Set<string>()
+   return (Array.isArray(events)?events:[]).filter((e:any)=>{
+     const lat=Number(e.latitude),lon=Number(e.longitude),mag=Number(e.magnitude)
+     if(!Number.isFinite(lat)||!Number.isFinite(lon)||lat < -90||lat>90||lon < -180||lon>180||!Number.isFinite(mag))return false
+     const key=String(e.external_id||e.id||`${lat},${lon},${e.occurred_at||''}`)
+     if(seen.has(key))return false
+     seen.add(key);return true
+   })
+ },[events])
+ const filtered=useMemo(()=>validEvents.filter((e:any)=>{
+   const date=new Date(e.occurred_at).getTime()
+   const inPeriod=period==='all'||(Number.isFinite(date)&&date<=now&&date>=now-periods[period])
+   return inPeriod&&Number(e.magnitude)>=Number(minMagnitude)&&(includeDemo||!e.is_demo)&&(!search||`${e.place||''} ${e.source||''} ${e.external_id||''}`.toLowerCase().includes(search.toLowerCase()))
+ }),[validEvents,period,minMagnitude,includeDemo,search,now])
+ const center=filtered.length?([filtered.reduce((a:number,e:any)=>a+Number(e.latitude),0)/filtered.length,filtered.reduce((a:number,e:any)=>a+Number(e.longitude),0)/filtered.length] as [number,number]):([-12.3,-76.5] as [number,number])
+ return <div className="panel map-panel"><PanelTitle title="Mapa sísmico" subtitle="Un solo mapa con filtros sobre los eventos sísmicos disponibles."/>
+  <div className="filterbar" style={{flexWrap:'wrap'}}>
+   <label>Período <select value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="90d">Últimos 90 días</option><option value="all">Todo el historial</option></select></label>
+   <label>Magnitud mínima <select value={minMagnitude} onChange={e=>setMinMagnitude(e.target.value)}><option value="0">Todas</option><option value="2">2.0+</option><option value="3">3.0+</option><option value="4">4.0+</option><option value="5">5.0+</option><option value="6">6.0+</option></select></label>
+   <div className="searchbox"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar ubicación, fuente o ID"/></div>
+   <label style={{display:'flex',alignItems:'center',gap:8}}><input type="checkbox" checked={includeDemo} onChange={e=>setIncludeDemo(e.target.checked)}/> Incluir demostración</label>
+   <span className="result-count">{filtered.length} puntos únicos</span>
+  </div>
+  <div className="map-legend"><span><i className="legend-dot small"/> Magnitud menor a 3</span><span><i className="legend-dot medium"/> 3.0–3.9</span><span><i className="legend-dot large"/> 4.0 o más</span></div>
+  <MapContainer key={`${period}-${minMagnitude}-${includeDemo}`} center={center} zoom={4} scrollWheelZoom style={{height:'520px',width:'100%',borderRadius:'12px'}}><TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{filtered.map((e:any)=><CircleMarker key={String(e.external_id||e.id)} center={[Number(e.latitude),Number(e.longitude)]} radius={Math.max(4,Math.min(14,Number(e.magnitude)*2.2))} pathOptions={{color:Number(e.magnitude)>=4?'#e45d70':Number(e.magnitude)>=3?'#e6a23c':'#168ee0',fillOpacity:.65}}><Popup><b>{e.place||'Ubicación no indicada'}</b><br/>Magnitud: {n(e.magnitude,1)}<br/>Profundidad: {n(e.depth_km,1)} km<br/>{fmtDate(e.occurred_at)}<br/>Fuente: {e.source||'No indicada'}{e.is_demo?' · DEMO':''}{e.source_url&&<><br/><a href={e.source_url} target="_blank" rel="noreferrer">Abrir evento original</a></>}</Popup></CircleMarker>)}</MapContainer>
+  {!filtered.length&&<Empty text="No hay eventos con coordenadas que coincidan con los filtros."/>}
+  <p className="map-disclaimer"><AlertTriangle size={14}/> Los puntos representan ubicaciones reportadas; no representan pronósticos ni zonas de impacto. El filtro solo cambia los eventos visibles.</p>
+ </div>
+}
 function AnalysisPage({data,summary}:any){const a=data||{};return <><div className="stat-grid"><Stat label="Tamaño de muestra" value={n(a.count,0)} unit="eventos" change="Registros disponibles" icon={Database}/><Stat label="Magnitud media" value={n(a.mean_magnitude,2)} unit="" change="Media aritmética" icon={Activity} tone="cyan"/><Stat label="Magnitud mediana" value={n(a.median_magnitude,2)} unit="" change="Centro de la distribución" icon={BarChart3} tone="purple"/><Stat label="Profundidad media" value={n(a.mean_depth,1)} unit="km" change="Variable descriptiva" icon={Layers3} tone="amber"/></div><div className="panel"><PanelTitle title="Magnitud frente a profundidad" subtitle="Cada punto es un evento del catálogo; X = profundidad (km), Y = magnitud"/><div className="scatter">{(a.scatter||[]).map((p:any,i:number)=><div key={i} className="scatter-row"><span>{p.place}</span><div className="scatter-track"><i style={{left:`${Math.min(96,Math.max(1,(p.x/Math.max(1,...(a.scatter||[]).map((x:any)=>x.x)))*100))}%`}} title={`${p.x} km / M ${p.y}`}/></div><b>{n(p.x,1)} km · M {n(p.y,1)}</b></div>)}</div><div className="footnote"><AlertTriangle size={15}/>{a.warning||'El análisis es descriptivo. Correlación no implica causalidad.'} Correlación de Pearson: {a.correlation===null||a.correlation===undefined?'No disponible':n(a.correlation,3)}.</div></div><div className="panel"><PanelTitle title="Distribución por rango" subtitle="Frecuencia de los registros guardados"/><div className="chart-wrap"><ResponsiveContainer width="100%" height={250}><BarChart data={summary?.magnitude_distribution||[]}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="label"/><YAxis allowDecimals={false}/><Tooltip/><Bar dataKey="count" fill="#35b6b0" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer></div></div></>}
 
 function SourcesPage({ rows, onRefresh, notify }: any) {
@@ -209,7 +243,7 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
       .toLowerCase()
       .includes("usgs");
 
-    return {
+ return {
       ...r,
       officialUrl: isUsgs
         ? "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
@@ -283,8 +317,7 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
           icon={CheckCircle2}
           tone="cyan"
         />
-
-        <Stat
+                <Stat
           label="Con errores"
           value={String(
             sources.filter((s: any) =>
@@ -348,7 +381,7 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
         </button>
       </div>
 
-      <div className="table-scroll">
+        <div className="table-scroll">
         <table>
           <thead>
             <tr>
@@ -415,8 +448,7 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
                       ? "Manual"
                       : "Pendiente de configurar"}
                   </td>
-
-                  <td>{fmtDate(s.last_sync_at)}</td>
+                   <td>{fmtDate(s.last_sync_at)}</td>
 
                   <td>
                     {s.status === "Disponible"
@@ -458,7 +490,7 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
                       "Sin registros de ejecución"}
                   </td>
                 </tr>
-              ))
+ ))
             ) : (
               <tr>
                 <td colSpan={12}>
@@ -481,22 +513,29 @@ function SourcesPage({ rows, onRefresh, notify }: any) {
   );
 }
 
-function DataPage({active,rows,onRefresh,notify}:any){
+function DataPage({active,rows,events: eventRowsProp=[],onRefresh,notify}:any){
   
-  if (active === "sources") {
-    return (
-      <SourcesPage
-        rows={rows}
-        onRefresh={onRefresh}
-        notify={notify}
-      />
-    );
-  }
-
  const configs:Record<string,{title:string,sub:string,cols:string[]}>={datasets:{title:'Conjuntos de datos',sub:'Versiones, tamaño de muestra y validación básica.',cols:['name','source','version','row_count','null_count','status']},ml:{title:'Registro de experimentos',sub:'Trazabilidad de algoritmos, variables y limitaciones.',cols:['name','task_type','algorithm','target','status','created_at']},estimates:{title:'Estimaciones experimentales',sub:'Indicadores exploratorios; no constituyen alertas oficiales.',cols:['model_name','area','metric_name','value','disclaimer','created_at']},rules:{title:'Reglas configuradas',sub:'Umbrales que se aplican a eventos recibidos del proveedor.',cols:['name','min_magnitude','zone','severity','enabled']},alerts:{title:'Bandeja de alertas internas',sub:'Avisos generados por reglas; no se envían a canales públicos.',cols:['title','severity','status','channel','created_at']},sources:{title:'Fuentes registradas',sub:'Procedencia, estado y última sincronización de conectores.',cols:['name','organization','source_type','status','last_sync_at','last_message']},users:{title:'Directorio de usuarios',sub:'Roles de referencia. La autenticación real debe completarse antes de producción.',cols:['full_name','email','role','status','created_at']},audit:{title:'Bitácora de auditoría',sub:'Registro de acciones administrativas y operativas.',cols:['actor','action','entity_type','entity_id','detail','occurred_at']}}
  const c=configs[active]
  const headers:Record<string,string>={name:'Nombre',source:'Fuente',version:'Versión',row_count:'Filas',null_count:'Nulos',status:'Estado',task_type:'Tipo de tarea',algorithm:'Algoritmo',target:'Variable objetivo',created_at:'Fecha',model_name:'Modelo',area:'Zona',metric_name:'Indicador',value:'Valor',disclaimer:'Advertencia',min_magnitude:'Magnitud mínima',zone:'Zona',severity:'Severidad',enabled:'Activa',title:'Título',channel:'Canal',organization:'Organización',source_type:'Tipo',last_sync_at:'Última sincronización',last_message:'Mensaje',full_name:'Nombre',email:'Correo',role:'Rol',actor:'Usuario',action:'Acción',entity_type:'Entidad',entity_id:'ID',detail:'Detalle',occurred_at:'Fecha UTC'}
- return <><div className="panel"><PanelTitle title={c.title} subtitle={c.sub} action={<button className="btn btn-secondary btn-small" onClick={onRefresh}><RefreshCw size={14}/> Actualizar</button>}/>{active==='alerts'&&<div className="inline-actions"><button className="btn btn-primary" onClick={async()=>{try{const r=await post('/api/v1/alerts/evaluate');notify(r.message);onRefresh()}catch(e:any){notify(e.message)}}}><BellRing size={15}/> Evaluar reglas</button><span>Solo evalúa eventos reales sincronizados; se crean avisos internos deduplicados.</span></div>}<div className="table-scroll"><table><thead><tr>{c.cols.map(k=><th key={k}>{headers[k]||k}</th>)}{active==='alerts'&&<th>ACCIÓN</th>}</tr></thead><tbody>{rows.length?rows.map((r:any)=><tr key={r.id}>{c.cols.map(k=><td key={k}>{k==='enabled'?<span className={`review ${r[k]?'good':'demo'}`}>{r[k]?'Sí':'No'}</span>:k==='status'?<span className="review">{r[k]}</span>:k==='created_at'||k==='last_sync_at'||k==='occurred_at'?fmtDate(r[k]):k==='disclaimer'||k==='detail'||k==='last_message'?<span className="truncate" title={String(r[k]||'')}>{String(r[k]||'—')}</span>:String(r[k]??'—')}</td>)}{active==='alerts'&&<td>{r.status==='Pendiente'&&<button className="text-action" onClick={async()=>{await post(`/api/v1/alerts/${r.id}/acknowledge`);notify('Alerta marcada como revisada.');onRefresh()}}>Marcar revisada</button>}</td>}</tr>):<tr><td colSpan={c.cols.length+1}><Empty text="Todavía no hay registros en este módulo."/></td></tr>}</tbody></table></div></div>{active==='ml'&&<div className="footnote"><BrainCircuit size={16}/> Esta versión registra experimentos, pero no simula un entrenamiento válido. Para activar ML se necesita una variable objetivo defendible, datasets versionados y evaluación temporal.</div>}{active==='users'&&<div className="footnote"><ShieldCheck size={16}/> Los roles son metadatos de referencia en esta versión; no deben considerarse control de acceso completo en producción.</div>}</>
+ const eventRows=Array.isArray(eventRowsProp)?eventRowsProp:[]
+ const validEvents=eventRows.filter((e:any)=>Number.isFinite(Number(e.latitude))&&Number.isFinite(Number(e.longitude))&&Number.isFinite(Number(e.magnitude))&&e.occurred_at)
+ const [preparedMinMag,setPreparedMinMag]=useState('0')
+ const [preparedIncludeDemo,setPreparedIncludeDemo]=useState(false)
+ const prepared=validEvents.filter((e:any)=>Number(e.magnitude)>=Number(preparedMinMag)&&(preparedIncludeDemo||!e.is_demo))
+ const exportPrepared=()=>{
+   const cols=['external_id','source','occurred_at','latitude','longitude','magnitude','depth_km','place','source_url','is_demo']
+   const cell=(v:any)=>`"${String(v??'').replace(/"/g,'""')}"`
+   const csv=[cols.join(','),...prepared.map((e:any)=>cols.map(k=>cell(e[k])).join(','))].join('\r\n')
+   const url=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));const a=document.createElement('a');a.href=url;a.download='dataset_sismico_preparado.csv';a.click();URL.revokeObjectURL(url);notify(`CSV preparado: ${prepared.length} eventos exportados.`)
+ }
+  if (active === "sources") {
+   return <SourcesPage rows={rows} onRefresh={onRefresh} notify={notify} />;
+ }
+ const magnitudes=eventRows.map((e:any)=>Number(e.magnitude)).filter((v:number)=>Number.isFinite(v))
+ const meanMagnitude=magnitudes.length?magnitudes.reduce((a:number,b:number)=>a+b,0)/magnitudes.length:0
+ const uniqueIds=new Set(eventRows.map((e:any)=>e.external_id||e.id).filter(Boolean)).size
+ return <>{active==='datasets'&&<div className="panel"><PanelTitle title="Preparación rápida del catálogo" subtitle="Revisa la calidad de los eventos y exporta un CSV para análisis externo."/><div className="stat-grid"><Stat label="Eventos cargados" value={n(eventRows.length,0)} change="Registros recibidos de la API" icon={Database}/><Stat label="Con coordenadas y magnitud" value={n(validEvents.length,0)} change="Candidatos para análisis geográfico" icon={CheckCircle2} tone="cyan"/><Stat label="Identificadores únicos" value={n(uniqueIds,0)} change="Estimación basada en ID externo o interno" icon={ShieldCheck} tone="purple"/><Stat label="Filas exportables" value={n(prepared.length,0)} change="Después de los filtros de abajo" icon={Download} tone="amber"/></div><div className="inline-actions" style={{flexWrap:'wrap',margin:'16px 0'}}><label>Magnitud mínima <select value={preparedMinMag} onChange={e=>setPreparedMinMag(e.target.value)}><option value="0">Todas</option><option value="2">2.0+</option><option value="3">3.0+</option><option value="4">4.0+</option><option value="5">5.0+</option></select></label><label><input type="checkbox" checked={preparedIncludeDemo} onChange={e=>setPreparedIncludeDemo(e.target.checked)}/> Incluir demostración</label><button className="btn btn-primary" onClick={exportPrepared} disabled={!prepared.length}><Download size={15}/> Descargar dataset CSV</button></div><p className="footnote"><ShieldCheck size={15}/> Este paso filtra y exporta datos disponibles en el navegador; no altera el catálogo de la base de datos ni sustituye una validación científica.</p></div>}{active==='ml'&&<div className="panel"><PanelTitle title="Diagnóstico antes de entrenar" subtitle="Comprobaciones básicas sobre el catálogo actual; no representa un modelo entrenado."/><div className="stat-grid"><Stat label="Eventos disponibles" value={n(eventRows.length,0)} change="Muestra cargada desde API" icon={Database}/><Stat label="Magnitud media" value={n(meanMagnitude,2)} change="Referencia descriptiva, no predicción" icon={BrainCircuit} tone="cyan"/><Stat label="Eventos con coordenadas" value={n(validEvents.length,0)} change="Útiles para tareas geoespaciales" icon={MapPinned} tone="purple"/><Stat label="Experimentos registrados" value={n(rows.length,0)} change="Registros persistidos por backend" icon={ClipboardList} tone="amber"/></div><p>Flujo recomendado: prepara y exporta el catálogo, define una variable objetivo verificable, separa entrenamiento y prueba por tiempo, compara contra una línea base y registra métricas. No se entrenará un modelo automáticamente desde esta pantalla si la API no expone un endpoint de entrenamiento.</p><button className="btn btn-secondary" onClick={()=>notify('Primero prepara el dataset y define una variable objetivo; no se ha iniciado entrenamiento.')}> <BrainCircuit size={15}/> Revisar requisitos de entrenamiento</button><p className="footnote"><AlertTriangle size={15}/> Los terremotos no se pueden predecir con certeza mediante este diagnóstico. No usarlo para decisiones de seguridad.</p></div>}{active==='estimates'&&<div className="panel"><PanelTitle title="Indicadores experimentales del catálogo" subtitle="Resumen descriptivo calculado en el navegador, no pronóstico sísmico."/><div className="stat-grid"><Stat label="Eventos evaluados" value={n(magnitudes.length,0)} change="Registros con magnitud numérica" icon={Activity}/><Stat label="Magnitud media observada" value={n(meanMagnitude,2)} change="Promedio histórico cargado" icon={Gauge} tone="cyan"/><Stat label="Mayor magnitud en muestra" value={n(magnitudes.length?Math.max(...magnitudes):0,1)} change="Máximo observado, no esperado" icon={Waves} tone="purple"/><Stat label="Estimaciones guardadas" value={n(rows.length,0)} change="Registros de la API" icon={ClipboardList} tone="amber"/></div><p>Estos indicadores describen la muestra recibida. Para comparar períodos, documenta fuente, intervalo temporal, tamaño de muestra y limitaciones; no extrapoles estos valores como predicciones futuras.</p><p className="footnote"><AlertTriangle size={15}/> Las estimaciones experimentales no son alertas oficiales ni predicen cuándo o dónde ocurrirá un sismo.</p></div>}{active==='alerts'&&<div className="panel"><PanelTitle title="Cómo operar las alertas internas" subtitle="Las reglas evalúan eventos registrados; no son un sistema oficial de alerta temprana."/><ol><li>En <b>Reglas de alertas</b>, crea una regla con nombre, magnitud mínima, zona y severidad.</li><li>Verifica que los eventos provengan de una fuente real y sincronizada.</li><li>En este centro, pulsa <b>Evaluar reglas</b> para pedir al backend que evalúe el catálogo.</li><li>Revisa y reconoce los avisos generados para dejar constancia de seguimiento.</li></ol><p className="footnote"><AlertTriangle size={15}/> No se envían avisos públicos ni se debe usar esta función como sustituto de los canales oficiales.</p></div>}{active==='rules'&&<div className="panel"><PanelTitle title="Criterios para reglas" subtitle="Configura umbrales internos prudentes."/><p>Una regla no predice un sismo: solo genera un aviso interno cuando un evento ya registrado cumple las condiciones configuradas. Ajusta magnitud, zona y severidad y luego ejecuta la evaluación desde el Centro de alertas.</p></div>}<div className="panel"><PanelTitle title={c.title} subtitle={c.sub} action={<button className="btn btn-secondary btn-small" onClick={onRefresh}><RefreshCw size={14}/> Actualizar</button>}/>{active==='alerts'&&<div className="inline-actions"><button className="btn btn-primary" onClick={async()=>{try{const r=await post('/api/v1/alerts/evaluate');notify(r.message);onRefresh()}catch(e:any){notify(e.message)}}}><BellRing size={15}/> Evaluar reglas</button><span>Solo evalúa eventos reales sincronizados; se crean avisos internos deduplicados.</span></div>}<div className="table-scroll"><table><thead><tr>{c.cols.map(k=><th key={k}>{headers[k]||k}</th>)}{active==='alerts'&&<th>ACCIÓN</th>}</tr></thead><tbody>{rows.length?rows.map((r:any)=><tr key={r.id}>{c.cols.map(k=><td key={k}>{k==='enabled'?<span className={`review ${r[k]?'good':'demo'}`}>{r[k]?'Sí':'No'}</span>:k==='status'?<span className="review">{r[k]}</span>:k==='created_at'||k==='last_sync_at'||k==='occurred_at'?fmtDate(r[k]):k==='disclaimer'||k==='detail'||k==='last_message'?<span className="truncate" title={String(r[k]||'')}>{String(r[k]||'—')}</span>:String(r[k]??'—')}</td>)}{active==='alerts'&&<td>{r.status==='Pendiente'&&<button className="text-action" onClick={async()=>{await post(`/api/v1/alerts/${r.id}/acknowledge`);notify('Alerta marcada como revisada.');onRefresh()}}>Marcar revisada</button>}</td>}</tr>):<tr><td colSpan={c.cols.length+1}><Empty text="Todavía no hay registros en este módulo."/></td></tr>}</tbody></table></div></div>{active==='ml'&&<div className="footnote"><BrainCircuit size={16}/> Esta versión registra experimentos, pero no simula un entrenamiento válido. Para activar ML se necesita una variable objetivo defendible, datasets versionados y evaluación temporal.</div>}{active==='users'&&<div className="footnote"><ShieldCheck size={16}/> Los roles son metadatos de referencia en esta versión; no deben considerarse control de acceso completo en producción.</div>}</>
 }
 
 function Reports({ onDownload, events }: any) {
@@ -530,8 +569,7 @@ function Reports({ onDownload, events }: any) {
       const text = String(value ?? "");
       return `"${text.replace(/"/g, '""')}"`;
     };
-
-    const csv = [
+  const csv = [
       columns.join(","),
       ...filteredEvents.map((event: any) =>
         columns.map((column) => escapeCSV(event[column])).join(",")
@@ -571,8 +609,7 @@ function Reports({ onDownload, events }: any) {
           icon={BarChart3}
           tone="cyan"
         />
-
-        <Stat
+ <Stat
           label="Fecha de generación"
           value={new Date().toLocaleDateString("es-PE")}
           unit=""
@@ -633,7 +670,7 @@ function Reports({ onDownload, events }: any) {
             className="btn btn-secondary"
             onClick={onDownload}
           >
-            <Database size={16} />
+             <Database size={16} />
             Exportar catálogo completo del servidor
           </button>
         </div>
@@ -692,7 +729,6 @@ function Reports({ onDownload, events }: any) {
     </>
   );
 }
-
 function AuditPage({
   rows,
   onRefresh,
@@ -816,8 +852,7 @@ function AuditPage({
           </tbody>
         </table>
       </div>
-
-      <p className="footnote">
+<p className="footnote">
         Esta pantalla filtra los registros recibidos. La integridad,
         retención y protección contra modificaciones de la bitácora
         deben garantizarse en el backend.
@@ -889,8 +924,7 @@ function ConfigurationPage() {
               change="Versión publicada por la API"
               icon={Settings}
             />
-
-            <Stat
+<Stat
               label="Entorno"
               value={config.environment || "No indicado"}
               unit=""
