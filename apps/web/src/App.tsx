@@ -18,7 +18,20 @@ const modules = [
   {id:'sources',label:'Fuentes de datos',icon:RadioTower,group:'ADMINISTRACIÓN'},
   {id:'reports',label:'Reportes',icon:FileBarChart,group:'ADMINISTRACIÓN'},
   {id:'users',label:'Usuarios y roles',icon:Users,group:'ADMINISTRACIÓN'},
-  {id:'audit',label:'Auditoría y configuración',icon:ShieldCheck,group:'ADMINISTRACIÓN'}
+  
+{
+  id: "audit",
+  label: "Auditoría",
+  icon: ShieldCheck,
+  group: "ADMINISTRACIÓN",
+},
+{
+  id: "config",
+  label: "Configuración",
+  icon: Settings,
+  group: "ADMINISTRACIÓN",
+},
+
 ]
 const get = async (path:string) => { const r=await fetch(API+path); if(!r.ok) throw new Error((await r.json().catch(()=>({detail:'Error de API'}))).detail||'Error de API'); return r.json() }
 const post = async (path:string, body?:AnyRow) => { const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}); if(!r.ok) throw new Error((await r.json().catch(()=>({detail:'Error de API'}))).detail||'Error de API'); return r.json() }
@@ -52,7 +65,47 @@ function App(){
       if(active==='ml'){endpoint='/api/v1/ml/experiments';body={name:formName,algorithm:formExtra||'Baseline'}}
       if(active==='estimates'){endpoint='/api/v1/estimates';body={model_name:formName,area:formExtra||'Perú',metric_name:'indicador_exploratorio',value:0}}
       if(active==='rules'){endpoint='/api/v1/alert-rules';body={name:formName,min_magnitude:Number(formExtra)||4,zone:'Perú',severity:'Media'}}
-      if(active==='users'){endpoint='/api/v1/users';const [full_name,email]=formName.split('|');body={full_name,email,role:formExtra||'Solo lectura'}}
+     
+if (active === "users") {
+  endpoint = "/api/v1/users";
+
+  const separator = formName.indexOf("|");
+
+  const full_name =
+    separator >= 0
+      ? formName.slice(0, separator).trim()
+      : "";
+
+  const email =
+    separator >= 0
+      ? formName.slice(separator + 1).trim().toLowerCase()
+      : "";
+
+  const allowedRoles = [
+    "Administrador",
+    "Analista",
+    "Operador de alertas",
+    "Auditor",
+    "Solo lectura",
+  ];
+
+  if (!full_name || !email || !email.includes("@")) {
+    notify(
+      "Escribe el nombre y el correo con el formato Nombre completo|correo@empresa.com."
+    );
+    return;
+  }
+
+  const role = formExtra || "Solo lectura";
+
+  if (!allowedRoles.includes(role)) {
+    notify("El rol seleccionado no es válido.");
+    return;
+  }
+
+  body = { full_name, email, role };
+}
+
       if(!endpoint) return
       await post(endpoint,body);setFormOpen(false);setFormName('');setFormExtra('');notify('Registro guardado correctamente.');await refresh()
     }catch(e:any){notify(e.message)}
@@ -445,6 +498,477 @@ function DataPage({active,rows,onRefresh,notify}:any){
  const headers:Record<string,string>={name:'Nombre',source:'Fuente',version:'Versión',row_count:'Filas',null_count:'Nulos',status:'Estado',task_type:'Tipo de tarea',algorithm:'Algoritmo',target:'Variable objetivo',created_at:'Fecha',model_name:'Modelo',area:'Zona',metric_name:'Indicador',value:'Valor',disclaimer:'Advertencia',min_magnitude:'Magnitud mínima',zone:'Zona',severity:'Severidad',enabled:'Activa',title:'Título',channel:'Canal',organization:'Organización',source_type:'Tipo',last_sync_at:'Última sincronización',last_message:'Mensaje',full_name:'Nombre',email:'Correo',role:'Rol',actor:'Usuario',action:'Acción',entity_type:'Entidad',entity_id:'ID',detail:'Detalle',occurred_at:'Fecha UTC'}
  return <><div className="panel"><PanelTitle title={c.title} subtitle={c.sub} action={<button className="btn btn-secondary btn-small" onClick={onRefresh}><RefreshCw size={14}/> Actualizar</button>}/>{active==='alerts'&&<div className="inline-actions"><button className="btn btn-primary" onClick={async()=>{try{const r=await post('/api/v1/alerts/evaluate');notify(r.message);onRefresh()}catch(e:any){notify(e.message)}}}><BellRing size={15}/> Evaluar reglas</button><span>Solo evalúa eventos reales sincronizados; se crean avisos internos deduplicados.</span></div>}<div className="table-scroll"><table><thead><tr>{c.cols.map(k=><th key={k}>{headers[k]||k}</th>)}{active==='alerts'&&<th>ACCIÓN</th>}</tr></thead><tbody>{rows.length?rows.map((r:any)=><tr key={r.id}>{c.cols.map(k=><td key={k}>{k==='enabled'?<span className={`review ${r[k]?'good':'demo'}`}>{r[k]?'Sí':'No'}</span>:k==='status'?<span className="review">{r[k]}</span>:k==='created_at'||k==='last_sync_at'||k==='occurred_at'?fmtDate(r[k]):k==='disclaimer'||k==='detail'||k==='last_message'?<span className="truncate" title={String(r[k]||'')}>{String(r[k]||'—')}</span>:String(r[k]??'—')}</td>)}{active==='alerts'&&<td>{r.status==='Pendiente'&&<button className="text-action" onClick={async()=>{await post(`/api/v1/alerts/${r.id}/acknowledge`);notify('Alerta marcada como revisada.');onRefresh()}}>Marcar revisada</button>}</td>}</tr>):<tr><td colSpan={c.cols.length+1}><Empty text="Todavía no hay registros en este módulo."/></td></tr>}</tbody></table></div></div>{active==='ml'&&<div className="footnote"><BrainCircuit size={16}/> Esta versión registra experimentos, pero no simula un entrenamiento válido. Para activar ML se necesita una variable objetivo defendible, datasets versionados y evaluación temporal.</div>}{active==='users'&&<div className="footnote"><ShieldCheck size={16}/> Los roles son metadatos de referencia en esta versión; no deben considerarse control de acceso completo en producción.</div>}</>
 }
-function Reports({onDownload,events}:any){return <><div className="stat-grid"><Stat label="Eventos disponibles" value={n(events.length,0)} unit="filas" change="Incluye columna de origen demo/real" icon={Database}/><Stat label="Formatos disponibles" value="CSV" unit="" change="Exportación tabular" icon={FileBarChart} tone="cyan"/><Stat label="Fecha de corte" value={new Date().toLocaleDateString('es-PE')} unit="" change="Momento de consulta" icon={Clock3} tone="purple"/><Stat label="Trazabilidad" value="Incluida" unit="" change="Fuente y enlace cuando existe" icon={ShieldCheck} tone="amber"/></div><div className="panel report-card"><div className="report-icon"><FileBarChart size={25}/></div><div className="report-copy"><h3>Catálogo de eventos sísmicos</h3><p>Descarga CSV con identificador, fuente, fecha UTC, coordenadas, magnitud, profundidad, localidad, estado y marca de datos de demostración.</p><div className="report-meta"><span><Database size={14}/>{events.length} registros actuales</span><span><ShieldCheck size={14}/>Exportación registrada en auditoría</span></div></div><button className="btn btn-primary" onClick={onDownload}><Download size={16}/> Descargar CSV</button></div><div className="footnote"><AlertTriangle size={15}/> La exportación incluye datos de demostración. Filtra o identifica esos registros antes de cualquier uso operativo.</div></>}
+
+function Reports({ onDownload, events }: any) {
+  const [includeDemo, setIncludeDemo] = useState(false);
+  const [minimumMagnitude, setMinimumMagnitude] = useState("0");
+
+  const filteredEvents = events.filter((event: any) => {
+    const isDemo = Boolean(event.is_demo);
+    return (
+      (includeDemo || !isDemo) &&
+      Number(event.magnitude || 0) >= Number(minimumMagnitude)
+    );
+  });
+
+  const exportFilteredCSV = () => {
+    const columns = [
+      "external_id",
+      "source",
+      "occurred_at",
+      "latitude",
+      "longitude",
+      "magnitude",
+      "depth_km",
+      "place",
+      "source_url",
+      "review_status",
+      "is_demo",
+    ];
+
+    const escapeCSV = (value: any) => {
+      const text = String(value ?? "");
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const csv = [
+      columns.join(","),
+      ...filteredEvents.map((event: any) =>
+        columns.map((column) => escapeCSV(event[column])).join(",")
+      ),
+    ].join("\r\n");
+
+    const blob = new Blob(["\uFEFF" + csv], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "reporte_sismico_filtrado.csv";
+    link.click();
+
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <>
+      <div className="stat-grid">
+        <Stat
+          label="Registros del reporte"
+          value={n(filteredEvents.length, 0)}
+          unit="eventos"
+          change="Resultado de los filtros aplicados"
+          icon={Database}
+        />
+
+        <Stat
+          label="Magnitud mínima"
+          value={minimumMagnitude}
+          unit=""
+          change="Filtro del informe"
+          icon={BarChart3}
+          tone="cyan"
+        />
+
+        <Stat
+          label="Fecha de generación"
+          value={new Date().toLocaleDateString("es-PE")}
+          unit=""
+          change="Fecha local del navegador"
+          icon={Clock3}
+          tone="purple"
+        />
+
+        <Stat
+          label="Formato"
+          value="CSV"
+          unit=""
+          change="Compatible con Excel"
+          icon={FileBarChart}
+          tone="amber"
+        />
+      </div>
+
+      <div className="panel">
+        <PanelTitle
+          title="Filtros del reporte"
+          subtitle="Selecciona los registros que deseas exportar."
+        />
+
+        <div className="inline-actions">
+          <label>
+            Magnitud mínima
+            <select
+              value={minimumMagnitude}
+              onChange={(e) => setMinimumMagnitude(e.target.value)}
+            >
+              <option value="0">Todas</option>
+              <option value="2">2.0 o más</option>
+              <option value="3">3.0 o más</option>
+              <option value="4">4.0 o más</option>
+              <option value="5">5.0 o más</option>
+            </select>
+          </label>
+
+          <label>
+            <input
+              type="checkbox"
+              checked={includeDemo}
+              onChange={(e) => setIncludeDemo(e.target.checked)}
+            />
+            Incluir datos de demostración
+          </label>
+
+          <button
+            className="btn btn-primary"
+            onClick={exportFilteredCSV}
+          >
+            <Download size={16} />
+            Exportar reporte filtrado
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={onDownload}
+          >
+            <Database size={16} />
+            Exportar catálogo completo del servidor
+          </button>
+        </div>
+      </div>
+
+      <div className="panel">
+        <PanelTitle
+          title="Vista previa del reporte"
+          subtitle="Se muestran los datos que coinciden con los filtros."
+        />
+
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Identificador</th>
+                <th>Fuente</th>
+                <th>Fecha UTC</th>
+                <th>Magnitud</th>
+                <th>Ubicación</th>
+                <th>Tipo de dato</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredEvents.length > 0 ? (
+                filteredEvents.slice(0, 100).map((event: any) => (
+                  <tr key={event.id}>
+                    <td>{event.external_id || event.id}</td>
+                    <td>{event.source || "—"}</td>
+                    <td>{fmtDate(event.occurred_at)}</td>
+                    <td>{n(event.magnitude, 1)}</td>
+                    <td>{event.place || "—"}</td>
+                    <td>
+                      {event.is_demo ? "Demostración" : "Registrado"}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6}>
+                    No hay registros que coincidan con los filtros.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="footnote">
+          La vista previa muestra hasta 100 registros. El CSV filtrado
+          incluye todos los registros disponibles en el navegador.
+          El catálogo completo se exporta desde el servidor.
+        </p>
+      </div>
+    </>
+  );
+}
+
+function AuditPage({
+  rows,
+  onRefresh,
+}: {
+  rows: any[];
+  onRefresh: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [actionFilter, setActionFilter] = useState("Todas");
+
+  const actions = Array.from(
+    new Set(rows.map((row) => row.action).filter(Boolean))
+  );
+
+  const filtered = rows.filter((row) => {
+    const text = [
+      row.actor,
+      row.action,
+      row.entity_type,
+      row.entity_id,
+      row.detail,
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return (
+      text.includes(query.toLowerCase()) &&
+      (actionFilter === "Todas" || row.action === actionFilter)
+    );
+  });
+
+  return (
+    <div className="panel">
+      <PanelTitle
+        title="Auditoría del sistema"
+        subtitle="Consulta las acciones registradas por el backend."
+        action={
+          <button
+            className="btn btn-secondary btn-small"
+            onClick={onRefresh}
+          >
+            <RefreshCw size={14} />
+            Actualizar bitácora
+          </button>
+        }
+      />
+
+      <div className="filterbar">
+        <div className="searchbox">
+          <Search size={17} />
+          <input
+            placeholder="Buscar usuario, acción o detalle..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+
+        <label>
+          Acción
+          <select
+            value={actionFilter}
+            onChange={(e) => setActionFilter(e.target.value)}
+          >
+            <option value="Todas">Todas las acciones</option>
+            {actions.map((action) => (
+              <option key={action} value={action}>
+                {action}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <span className="result-count">
+          {filtered.length} registros
+        </span>
+      </div>
+
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha UTC</th>
+              <th>Usuario</th>
+              <th>Acción</th>
+              <th>Entidad</th>
+              <th>ID</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {filtered.length > 0 ? (
+              filtered.map((row: any) => (
+                <tr key={row.id}>
+                  <td>{fmtDate(row.occurred_at)}</td>
+                  <td>{row.actor || "Sistema"}</td>
+                  <td>
+                    <span className="review">
+                      {row.action || "—"}
+                    </span>
+                  </td>
+                  <td>{row.entity_type || "—"}</td>
+                  <td>{row.entity_id || "—"}</td>
+                  <td>
+                    <span
+                      className="truncate"
+                      title={String(row.detail || "")}
+                    >
+                      {row.detail || "—"}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={6}>
+                  No se encontraron registros de auditoría.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="footnote">
+        Esta pantalla filtra los registros recibidos. La integridad,
+        retención y protección contra modificaciones de la bitácora
+        deben garantizarse en el backend.
+      </p>
+    </div>
+  );
+}
+
+function ConfigurationPage() {
+  const [config, setConfig] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadConfig = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const data = await get("/api/v1/config");
+      setConfig(data);
+    } catch (e: any) {
+      setError(
+        e.message || "No se pudo cargar la configuración."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  return (
+    <div className="panel">
+      <PanelTitle
+        title="Configuración del sistema"
+        subtitle="Consulta los parámetros operativos publicados por el backend."
+        action={
+          <button
+            className="btn btn-secondary btn-small"
+            onClick={loadConfig}
+            disabled={loading}
+          >
+            <RefreshCw size={14} />
+            {loading ? "Consultando..." : "Actualizar"}
+          </button>
+        }
+      />
+
+      {error && (
+        <div className="error-banner">
+          <AlertTriangle size={18} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading && !config && (
+        <p>Consultando configuración del servidor...</p>
+      )}
+
+      {config && (
+        <>
+          <div className="stat-grid">
+            <Stat
+              label="Versión"
+              value={config.version || "No indicada"}
+              unit=""
+              change="Versión publicada por la API"
+              icon={Settings}
+            />
+
+            <Stat
+              label="Entorno"
+              value={config.environment || "No indicado"}
+              unit=""
+              change="Configuración del servidor"
+              icon={Database}
+              tone="cyan"
+            />
+
+            <Stat
+              label="Zona horaria"
+              value={config.timezone || "No indicada"}
+              unit=""
+              change="Referencia temporal"
+              icon={Clock3}
+              tone="purple"
+            />
+
+            <Stat
+              label="Alertas oficiales"
+              value={
+                config.official_alerts_enabled
+                  ? "Habilitadas"
+                  : "Deshabilitadas"
+              }
+              unit=""
+              change="Estado informado por la API"
+              icon={ShieldCheck}
+              tone="amber"
+            />
+          </div>
+
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                <tr>
+                  <th>Aplicación</th>
+                  <td>{config.application || "—"}</td>
+                </tr>
+                <tr>
+                  <th>Integración principal</th>
+                  <td>{config.source_integration || "—"}</td>
+                </tr>
+                <tr>
+                  <th>Alertas oficiales</th>
+                  <td>
+                    {config.official_alerts_enabled
+                      ? "Habilitadas"
+                      : "Deshabilitadas"}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Notas operativas</h3>
+
+          {Array.isArray(config.notes) &&
+          config.notes.length > 0 ? (
+            <ul>
+              {config.notes.map(
+                (note: string, index: number) => (
+                  <li key={index}>{note}</li>
+                )
+              )}
+            </ul>
+          ) : (
+            <p>No hay notas operativas publicadas.</p>
+          )}
+
+          <p className="footnote">
+            Esta pantalla consulta la configuración del servidor.
+            No modifica parámetros ni secretos.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Empty({text='No hay datos disponibles para mostrar.'}:any){return <div className="empty"><div><Boxes size={23}/></div><b>{text}</b></div>}
 export default App
